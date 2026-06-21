@@ -1226,6 +1226,20 @@ body {
 }
 @keyframes orbit-spin { to { transform: rotate(360deg); } }
 
+/* Light theme: the rings/orbits wash out on the bright sky — lift their contrast */
+[data-theme='light'] .landing-ring { border-color: color-mix(in srgb, var(--accent) 46%, transparent); }
+[data-theme='light'] .landing-ring--inner { opacity: 0.95; }
+[data-theme='light'] .landing-ring--mid { opacity: 0.75; }
+[data-theme='light'] .landing-ring--outer { opacity: 0.5; }
+[data-theme='light'] .landing-orbit-path { border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
+[data-theme='light'] .landing-orbit--b .landing-orbit-path { border-color: color-mix(in srgb, var(--accent-2) 40%, transparent); }
+[data-theme='light'] .landing-ring::after { box-shadow: 0 0 12px 1px var(--accent-glow), 0 0 0 1px rgba(10, 20, 40, 0.2); }
+[data-theme='light'] .landing-atmosphere {
+  background:
+    radial-gradient(ellipse 90% 70% at 50% 32%, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 58%),
+    radial-gradient(ellipse 50% 40% at 50% 28%, transparent 0%, transparent 100%);
+}
+
 /* HUD corner frame */
 .landing-frame {
   position: absolute;
@@ -1373,6 +1387,44 @@ body {
   .landing-title { font-size: clamp(34px, 11vw, 52px); }
   .landing-coords { display: none; }
   .landing-footer { justify-content: center; }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   CLICK HINT — gentle "tap the globe" affordance for click-modes
+   ════════════════════════════════════════════════════════════════ */
+.click-hint {
+  position: fixed;
+  left: 50%;
+  top: 46%;
+  z-index: 40;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.click-hint-dot {
+  position: absolute;
+  left: 0; top: 0;
+  width: 9px; height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffffff, var(--accent) 70%);
+  /* dark ring keeps it visible over bright oceans/land too */
+  box-shadow: 0 0 14px 3px var(--accent-glow), 0 0 0 1.5px rgba(0, 0, 0, 0.45);
+}
+.click-hint-ring {
+  position: absolute;
+  left: 0; top: 0;
+  width: 18px; height: 18px;
+  margin: -9px 0 0 -9px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  animation: click-pulse 2.6s var(--ease-out) infinite;
+}
+.click-hint-ring:nth-of-type(3) { animation-delay: 1.3s; }
+@keyframes click-pulse {
+  0% { transform: scale(0.5); opacity: 0.85; }
+  100% { transform: scale(3.6); opacity: 0; }
 }
 
 /* ════════════════════════════════════════════════════════════════

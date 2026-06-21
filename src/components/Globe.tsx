@@ -131,6 +131,9 @@ function hexA(hex: string, alpha: number): string {
   return `rgba(${r}, ${gC}, ${b}, ${alpha})`;
 }
 
+const prefersReduced = (): boolean =>
+  globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
 function makeMarker(d: HtmlDatum): HTMLElement {
   const el = document.createElement('div');
   el.className = `gx-marker gx-${d.kind}`;
@@ -247,6 +250,7 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
   // ── init once ───────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
+    const reduceMotion = prefersReduced();
     const globe = new GlobeGL(containerRef.current)
       .globeImageUrl(COLOR_URL)
       .bumpImageUrl(BUMP_URL)
@@ -293,9 +297,16 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     });
 
     // cinematic intro — emerge from deep space and approach Earth
-    globe.pointOfView({ lat: 4, lng: -34, altitude: 5.4 }, 0);
-    const flyIn1 = setTimeout(() => globe.pointOfView({ lat: 15, lng: -8, altitude: 3.4 }, 2600), 250);
-    const flyIn2 = setTimeout(() => globe.pointOfView({ lat: 22, lng: 14, altitude: 2.3 }, 3200), 2500);
+    // (reduced-motion: settle straight to the resting view, no long fly-in)
+    let flyIn1: ReturnType<typeof setTimeout> | undefined;
+    let flyIn2: ReturnType<typeof setTimeout> | undefined;
+    if (reduceMotion) {
+      globe.pointOfView({ lat: 22, lng: 14, altitude: 2.3 }, 0);
+    } else {
+      globe.pointOfView({ lat: 4, lng: -34, altitude: 5.4 }, 0);
+      flyIn1 = setTimeout(() => globe.pointOfView({ lat: 15, lng: -8, altitude: 3.4 }, 2600), 250);
+      flyIn2 = setTimeout(() => globe.pointOfView({ lat: 22, lng: 14, altitude: 2.3 }, 3200), 2500);
+    }
 
     // soft volumetric cloud shell (optional — silently skipped if unavailable)
     new THREE.TextureLoader().load(
@@ -312,7 +323,7 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
           clouds.rotation.y += (CLOUDS_ROTATION * Math.PI) / 180;
           cloudsRaf.current = requestAnimationFrame(spin);
         };
-        spin();
+        if (!reduceMotion) spin();
       },
       undefined,
       () => undefined,
@@ -398,13 +409,16 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
       }
       lifeRaf.current = requestAnimationFrame(life);
     };
-    life();
 
     const onPointerMove = (e: PointerEvent) => {
       pointerTarget.current.x = (e.clientX / globalThis.innerWidth) * 2 - 1;
       pointerTarget.current.y = (e.clientY / globalThis.innerHeight) * 2 - 1;
     };
-    globalThis.addEventListener('pointermove', onPointerMove);
+    // ambient drift + mouse-reactive light — skipped entirely for reduced motion
+    if (!reduceMotion) {
+      life();
+      globalThis.addEventListener('pointermove', onPointerMove);
+    }
 
     // globe-as-CTA: any interaction during landing dives into the experience
     const onInteractStart = () => {
@@ -430,8 +444,8 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
       .catch(() => onReadyRef.current());
 
     return () => {
-      clearTimeout(flyIn1);
-      clearTimeout(flyIn2);
+      if (flyIn1) clearTimeout(flyIn1);
+      if (flyIn2) clearTimeout(flyIn2);
       globalThis.removeEventListener('resize', onResize);
       globalThis.removeEventListener('pointermove', onPointerMove);
       controls.removeEventListener('start', onInteractStart);
@@ -552,7 +566,7 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
   useEffect(() => {
     const g = globeRef.current;
     if (!g) return;
-    g.controls().autoRotate = true;
+    g.controls().autoRotate = !prefersReduced();
     g.controls().autoRotateSpeed = isLanding ? 0.4 : 0.22;
   }, [isLanding]);
 
@@ -570,7 +584,7 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     g.controls().autoRotate = false;
     if (resumeTimer.current) window.clearTimeout(resumeTimer.current);
     resumeTimer.current = window.setTimeout(() => {
-      if (globeRef.current) globeRef.current.controls().autoRotate = true;
+      if (globeRef.current) globeRef.current.controls().autoRotate = !prefersReduced();
     }, 4000);
   };
 

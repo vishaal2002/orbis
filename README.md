@@ -32,7 +32,7 @@ Orbis renders a high-resolution Earth (`globe.gl` / Three.js) and overlays mode-
 | | 🚀 Space | Pull back to orbit — the Moon and the **live ISS** position |
 
 ### Always-on touches
-- **Live place info** on any click — nearest city, local time, day/night, and **live weather** (Open-Meteo).
+- **Live place info** on any click — the exact place (reverse-geocoded from the coordinates), local time, day/night, and **live weather** (Open-Meteo).
 - **Cinematic landing** — Earth emerges from deep space with concentric & tilted orbital rings; the globe itself is the call-to-action.
 - **Current location** 📍 and **double-click-to-fly** to where you are (geolocation).
 - **Deep-zoom handoff** to a 2D satellite map (MapLibre) when you zoom right in.
@@ -66,6 +66,7 @@ npm run dev        # http://localhost:5173
 | Source | Used for |
 |--------|----------|
 | [Open-Meteo](https://open-meteo.com) | Live weather on click |
+| [BigDataCloud](https://www.bigdatacloud.com) | Reverse geocoding (exact place name on click / locate) |
 | [World Bank API](https://data.worldbank.org) | Country timeline (population / GDP / internet) |
 | [wheretheiss.at](https://wheretheiss.at) | Live ISS position |
 | Natural Earth GeoJSON | Country polygons |

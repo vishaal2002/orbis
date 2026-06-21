@@ -38,11 +38,13 @@ import {
   DENSITY_BINS,
   COUNTRY_FACTS,
   densityColor,
+  type PlaceInfo,
 } from '../data';
 
 interface InfoPanelProps {
   mode: Mode;
   point: LatLng | null;
+  place: PlaceInfo | null;
   blastType: BlastType;
   onBlastTypeChange: (b: BlastType) => void;
   blastTypes: BlastType[];
@@ -98,7 +100,7 @@ export default function InfoPanel(props: Readonly<InfoPanelProps>) {
       className="info-panel glass"
     >
       <div className="panel-handle" aria-hidden="true" />
-      {point && <LocationHeader point={point} />}
+      {point && <LocationHeader point={point} place={props.place} />}
       <AnimatePresence mode="wait">
         <motion.div
           key={contentKey}
@@ -117,7 +119,7 @@ export default function InfoPanel(props: Readonly<InfoPanelProps>) {
 function PanelBody(props: Readonly<InfoPanelProps>) {
   switch (props.mode) {
     case 'dig':
-      return <DigBody point={props.point} />;
+      return <DigBody point={props.point} place={props.place} />;
     case 'blast':
       return (
         <BlastBody
@@ -173,7 +175,7 @@ function PanelBody(props: Readonly<InfoPanelProps>) {
 }
 
 // ── Shared bits ───────────────────────────────────────────────
-function LocationHeader({ point }: Readonly<{ point: LatLng }>) {
+function LocationHeader({ point, place }: Readonly<{ point: LatLng; place: PlaceInfo | null }>) {
   const now = useNow(1000);
   const city = getNearestCity(point.lat, point.lng);
   const [weather, setWeather] = useState<WeatherInfo | null>(null);
@@ -193,7 +195,9 @@ function LocationHeader({ point }: Readonly<{ point: LatLng }>) {
     };
   }, [point.lat, point.lng]);
 
-  const placeLabel = city ? `${city.name}, ${city.country}` : getLocationLabel(point.lat, point.lng);
+  // Prefer the precise reverse-geocoded place; fall back to coordinates
+  // (never to a far "nearest city", which is what mislabeled NE India).
+  const placeLabel = place?.label ?? getLocationLabel(point.lat, point.lng);
   const offset = city?.utcOffset ?? estimateUtcOffset(point.lng);
   const localTime = city
     ? now.toLocaleTimeString('en-US', { timeZone: city.timezone, hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -262,15 +266,15 @@ function Placeholder({ text }: Readonly<{ text: string }>) {
 }
 
 // ── Existing 5 modes ──────────────────────────────────────────
-function DigBody({ point }: Readonly<{ point: LatLng | null }>) {
+function DigBody({ point, place }: Readonly<{ point: LatLng | null; place: PlaceInfo | null }>) {
   if (!point) return <><Title sub="Tunnel straight through the planet">Dig</Title><Placeholder text="Click the globe to explore" /></>;
   const antipode = getAntipode(point.lat, point.lng);
-  const start = getNearestCity(point.lat, point.lng);
   const end = getNearestCity(antipode.lat, antipode.lng);
+  const clicked = place?.label ?? getLocationLabel(point.lat, point.lng);
   return (
     <>
       <Title sub="Tunnel straight through the planet">Dig</Title>
-      <Row label="You clicked" value={start?.name ?? getLocationLabel(point.lat, point.lng)} />
+      <Row label="You clicked" value={clicked} />
       <Row label="Comes out at" value={end?.name ?? getLocationLabel(antipode.lat, antipode.lng)} />
       {end && <Row label="Country" value={end.country} />}
       <Row label="Through Earth" value="12,742 km" />
@@ -706,6 +710,14 @@ function Metric({ label, a, b, fmt }: Readonly<{ label: string; a: number; b: nu
 }
 
 // ── Compare Countries ─────────────────────────────────────────
+function Source({ children }: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <p className="panel-sub" style={{ marginTop: 12, fontSize: 11, opacity: 0.7 }}>
+      {children}
+    </p>
+  );
+}
+
 function CompareBody({
   codes,
   onChange,
@@ -746,6 +758,7 @@ function CompareBody({
           <Metric label="Internet users" a={a.internetPct} b={b.internetPct} fmt={n => `${n}%`} />
           <div className="stat-row"><span className="stat-label">Capital</span><span className="stat-value">{a.capital} · {b.capital}</span></div>
           <div className="stat-row"><span className="stat-label">Language</span><span className="stat-value">{a.language} · {b.language}</span></div>
+          <Source>Figures: 2023–24 estimates</Source>
         </>
       )}
     </>
@@ -934,6 +947,7 @@ function TimelineBody({
             />
           )}
           {country && <p className="panel-sub" style={{ marginTop: 8 }}>{country.flag} {country.name}</p>}
+          <Source>Source: World Bank · 1990–latest</Source>
         </>
       )}
     </>
@@ -970,6 +984,7 @@ function PopulationBody() {
           value={<span style={{ color: densityColor(density) }}>{Math.round(density).toLocaleString()} / km²</span>}
         />
       ))}
+      <Source>Population &amp; area: 2023–24 estimates</Source>
     </>
   );
 }

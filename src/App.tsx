@@ -12,10 +12,14 @@ import type { Mode, LatLng, BlastType, ShrinkState, CountryInfo, City, Wonder, I
 
 // MapLibre is heavy — only load it when the user actually zooms into the map
 const MapView = lazy(() => import('./components/MapView'));
-import { BLAST_TYPES, PASSPORT_DATA, detectPassportCountry, CITIES, fetchISS } from './data';
+import { BLAST_TYPES, PASSPORT_DATA, detectPassportCountry, CITIES, fetchISS, reverseGeocode } from './data';
+import type { PlaceInfo } from './data';
 import { useTheme } from './theme';
 
 const cityByName = (name: string): City => CITIES.find(c => c.name === name) ?? CITIES[0];
+
+// Modes that only come alive after the user clicks a spot on the globe.
+const CLICK_MODES = new Set<Mode>(['dig', 'blast', 'scale', 'climatetwin', 'flightradius', 'shrinkray']);
 
 export default function App() {
   const { theme } = useTheme();
@@ -32,6 +36,23 @@ export default function App() {
 
   const [mode, setMode] = useState<Mode>('dig');
   const [selectedPoint, setSelectedPoint] = useState<LatLng | null>(null);
+  const [selectedPlace, setSelectedPlace] = useState<PlaceInfo | null>(null);
+
+  // Resolve the exact clicked coordinates to a real place (reverse geocode).
+  useEffect(() => {
+    if (!selectedPoint) {
+      setSelectedPlace(null);
+      return;
+    }
+    let active = true;
+    setSelectedPlace(null);
+    reverseGeocode(selectedPoint.lat, selectedPoint.lng).then(p => {
+      if (active) setSelectedPlace(p);
+    });
+    return () => {
+      active = false;
+    };
+  }, [selectedPoint]);
   const [blastType, setBlastType] = useState<BlastType>(BLAST_TYPES[0]);
 
   const [passportCode, setPassportCode] = useState('US');
@@ -114,7 +135,7 @@ export default function App() {
         setLocating(false);
         showToast('Location permission denied');
       },
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
     );
   }, [showToast]);
 
@@ -136,6 +157,8 @@ export default function App() {
   };
 
   const chromeVisible = !showLanding && !mapOpen;
+  const needsClick = CLICK_MODES.has(mode) && (mode === 'shrinkray' ? !shrink.source : !selectedPoint);
+  const showClickHint = chromeVisible && needsClick;
 
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: 'var(--bg-grad)' }}>
@@ -194,6 +217,7 @@ export default function App() {
             <InfoPanel
               mode={mode}
               point={selectedPoint}
+              place={selectedPlace}
               blastType={blastType}
               onBlastTypeChange={setBlastType}
               blastTypes={BLAST_TYPES}
@@ -218,6 +242,24 @@ export default function App() {
             />
             <ZoomControls globe={globeApi} onLocate={handleLocate} locating={locating} />
             <ModeSwitcher mode={mode} onChange={handleModeChange} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showClickHint && (
+          <motion.div
+            key="clickhint"
+            className="click-hint"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            aria-hidden="true"
+          >
+            <span className="click-hint-dot" />
+            <span className="click-hint-ring" />
+            <span className="click-hint-ring" />
           </motion.div>
         )}
       </AnimatePresence>

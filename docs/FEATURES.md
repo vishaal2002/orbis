@@ -21,7 +21,7 @@ When the app opens, the camera **emerges from deep space** and approaches Earth 
 
 Click anywhere on the globe, in any mode, and the panel header shows that location's:
 
-- **Nearest city + country** (or coordinates),
+- **Exact place** — the clicked coordinates are reverse-geocoded (BigDataCloud) to a real "City, Region, Country"; falls back to raw coordinates over open ocean (never to a far "nearest city"),
 - **Local time** (from the nearest city's timezone, or estimated from longitude),
 - **Day or night** (computed from the live solar position), and
 - **Live weather** — temperature, conditions, wind, humidity — fetched from **Open-Meteo**.
@@ -64,6 +64,7 @@ Modes are grouped into **Explore**, **Data**, and **Sky** in the bottom dock.
 | Source | Used by | Endpoint |
 |--------|---------|----------|
 | Open-Meteo | place-info weather | `api.open-meteo.com/v1/forecast` |
+| BigDataCloud | reverse geocoding (place names) | `api.bigdatacloud.net/data/reverse-geocode-client` |
 | World Bank | Timeline | `api.worldbank.org/v2/country/{iso2}/indicator/{id}` |
 | wheretheiss.at | Space | `api.wheretheiss.at/v1/satellites/25544` |
 | Natural Earth | country polygons | GeoJSON from the globe.gl example dataset |
@@ -79,7 +80,9 @@ All numeric "facts" datasets (country stats, cities, climate, wonders, Henley sc
 - **Performance**: country GeoJSON is fetched once and cached at module scope; MapLibre is lazy-loaded only on deep zoom.
 - **Camera handoff**: zooming in past a threshold opens a 2D satellite map ([`MapView.tsx`](../src/components/MapView.tsx)); zooming back out re-arms the globe.
 - **Day/Night shader**: see [`src/lib/dayNightMaterial.ts`](../src/lib/dayNightMaterial.ts) and the generated night-lights texture in [`src/lib/nightLightsTexture.ts`](../src/lib/nightLightsTexture.ts).
-- **Accessibility/motion**: `prefers-reduced-motion` is respected for the heavier ambient animations.
+- **Accessibility/motion**: `prefers-reduced-motion` is respected app-wide via `MotionConfig reducedMotion="user"`, plus explicit guards on the globe's JS-driven motion (cosmic dust, mouse-reactive light, cloud spin, the cinematic fly-in, and auto-rotate).
+- **Performance**: heavy vendor code (`three`/`globe.gl`, `framer-motion`, `turf`) is split into long-cached chunks, and the app `preconnect`s/`dns-prefetch`es its texture & data hosts.
+- **Location accuracy**: clicks and browser geolocation (`enableHighAccuracy`) are reverse-geocoded from the precise coordinates rather than snapped to a city list.
 
 ---
 

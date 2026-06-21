@@ -615,6 +615,40 @@ export function estimateUtcOffset(lng: number): number {
 }
 
 // ───────────────────────────────────────────────────────────────
+// REVERSE GEOCODING — BigDataCloud (keyless, CORS, client-side)
+// Resolves exact coordinates to a real place, instead of snapping to
+// the small curated city list (which mislabels e.g. Odisha → Chennai).
+// ───────────────────────────────────────────────────────────────
+export interface PlaceInfo {
+  label: string;
+  city: string;
+  region: string;
+  country: string;
+  countryCode: string;
+}
+
+export async function reverseGeocode(lat: number, lng: number): Promise<PlaceInfo | null> {
+  try {
+    const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const d = (await res.json()) as Record<string, unknown>;
+    const city = String((d.city as string) || (d.locality as string) || '').trim();
+    const region = String((d.principalSubdivision as string) || '').trim();
+    const country = String((d.countryName as string) || '').trim();
+    const countryCode = String((d.countryCode as string) || '').trim();
+    if (!city && !region && !country) return null; // open ocean / no data
+    const seen = new Set<string>();
+    const label = [city, region, country]
+      .filter(p => p && !seen.has(p) && seen.add(p))
+      .join(', ');
+    return { label, city, region, country, countryCode };
+  } catch {
+    return null;
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
 // COUNTRY TIMELINE — World Bank (keyless, CORS)
 // ───────────────────────────────────────────────────────────────
 export const TIMELINE_INDICATORS = {
