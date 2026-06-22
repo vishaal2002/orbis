@@ -1,70 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Layers,
-  Drill,
-  Zap,
-  Sun,
-  Moon,
-  Plane,
-  Stamp,
-  Thermometer,
-  Shrink,
-  GitCompareArrows,
-  Route,
-  Mountain,
-  Rocket,
-  LineChart,
-  Users,
-  type LucideIcon,
-} from 'lucide-react';
+import { Sun, Moon, LayoutGrid } from 'lucide-react';
 import type { Mode } from '../types';
+import { MODE_META, MODE_GROUPS } from '../modes';
 import { useTheme } from '../theme';
-
-interface ModeMeta {
-  id: Mode;
-  icon: LucideIcon;
-  label: string;
-}
-
-const MODE_MAP: Record<Mode, ModeMeta> = {
-  dig: { id: 'dig', icon: Drill, label: 'Dig' },
-  blast: { id: 'blast', icon: Zap, label: 'Blast' },
-  scale: { id: 'scale', icon: Layers, label: 'Scale' },
-  shrinkray: { id: 'shrinkray', icon: Shrink, label: 'Shrink' },
-  flightradius: { id: 'flightradius', icon: Plane, label: 'Radius' },
-  flightroute: { id: 'flightroute', icon: Route, label: 'Route' },
-  compare: { id: 'compare', icon: GitCompareArrows, label: 'Compare' },
-  timeline: { id: 'timeline', icon: LineChart, label: 'Timeline' },
-  population: { id: 'population', icon: Users, label: 'Population' },
-  climatetwin: { id: 'climatetwin', icon: Thermometer, label: 'Climate' },
-  visa: { id: 'visa', icon: Stamp, label: 'Visa' },
-  daynight: { id: 'daynight', icon: Sun, label: 'Day/Night' },
-  wonders: { id: 'wonders', icon: Mountain, label: 'Wonders' },
-  space: { id: 'space', icon: Rocket, label: 'Space' },
-};
-
-const GROUPS: { label: string; modes: Mode[] }[] = [
-  { label: 'Explore', modes: ['dig', 'blast', 'scale', 'shrinkray', 'flightradius', 'flightroute'] },
-  { label: 'Data', modes: ['compare', 'timeline', 'population', 'climatetwin', 'visa'] },
-  { label: 'Sky', modes: ['daynight', 'wonders', 'space'] },
-];
 
 interface ModeSwitcherProps {
   mode: Mode;
   onChange: (m: Mode) => void;
+  onOpenGallery: () => void;
 }
 
-export default function ModeSwitcher({ mode, onChange }: Readonly<ModeSwitcherProps>) {
+export default function ModeSwitcher({ mode, onChange, onOpenGallery }: Readonly<ModeSwitcherProps>) {
   const { theme, toggle } = useTheme();
   const [activeGroup, setActiveGroup] = useState(() =>
-    Math.max(0, GROUPS.findIndex(g => g.modes.includes(mode))),
+    Math.max(0, MODE_GROUPS.findIndex(g => g.modes.includes(mode))),
   );
-  const modesRef = useRef<HTMLDivElement>(null);
   const activeBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const gi = GROUPS.findIndex(g => g.modes.includes(mode));
+    const gi = MODE_GROUPS.findIndex(g => g.modes.includes(mode));
     if (gi >= 0) setActiveGroup(gi);
   }, [mode]);
 
@@ -72,7 +27,7 @@ export default function ModeSwitcher({ mode, onChange }: Readonly<ModeSwitcherPr
     activeBtnRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }, [mode, activeGroup]);
 
-  const group = GROUPS[activeGroup];
+  const group = MODE_GROUPS[activeGroup];
 
   return (
     <motion.div
@@ -82,8 +37,20 @@ export default function ModeSwitcher({ mode, onChange }: Readonly<ModeSwitcherPr
       transition={{ delay: 0.15, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
     >
       <div className="dock-bar">
+        <button
+          className="icon-btn dock-gallery"
+          onClick={onOpenGallery}
+          title="Explore all modes"
+          aria-label="Explore all modes"
+          type="button"
+        >
+          <LayoutGrid size={16} strokeWidth={2} />
+        </button>
+
+        <span className="dock-divider" aria-hidden="true" />
+
         <div className="dock-tabs" role="tablist" aria-label="Mode categories">
-          {GROUPS.map((g, i) => (
+          {MODE_GROUPS.map((g, i) => (
             <button
               key={g.label}
               type="button"
@@ -99,10 +66,10 @@ export default function ModeSwitcher({ mode, onChange }: Readonly<ModeSwitcherPr
 
         <span className="dock-divider" aria-hidden="true" />
 
-        <div className="dock-modes" ref={modesRef} role="tabpanel">
+        <div className="dock-modes" role="tabpanel">
           <AnimatePresence mode="popLayout">
             {group.modes.map(id => {
-              const m = MODE_MAP[id];
+              const m = MODE_META[id];
               const Icon = m.icon;
               const active = mode === id;
               return (
@@ -119,7 +86,7 @@ export default function ModeSwitcher({ mode, onChange }: Readonly<ModeSwitcherPr
                   onClick={() => onChange(id)}
                   aria-pressed={active}
                   aria-label={m.label}
-                  title={m.label}
+                  title={`${m.label} — ${m.blurb}`}
                 >
                   <Icon size={18} strokeWidth={active ? 2.2 : 1.8} />
                   <span>{m.label}</span>

@@ -10,6 +10,7 @@ import {
   getClimateTwins,
   getNearestCity,
   getCitiesInRadius,
+  destinationPoint,
   generateCirclePolygon,
   getBlastZones,
   subsolarPoint,
@@ -208,6 +209,8 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
   const dayNightMatRef = useRef<THREE.ShaderMaterial | null>(null);
   const savedGlobeMatRef = useRef<THREE.Material | null>(null);
   const spaceGroupRef = useRef<THREE.Group | null>(null);
+  const digGroupRef = useRef<THREE.Group | null>(null);
+  const digRaf = useRef<number | null>(null);
   const mapOpenRef = useRef(mapOpen);
   const armedRef = useRef(true);
   const prevMapOpen = useRef(mapOpen);
@@ -608,7 +611,13 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
         return;
       }
 
-      g.pointOfView({ lat, lng, altitude: 1.8 }, 1000);
+      if (mode === 'dig') {
+        // view ~70° off the clicked point so the through-planet beam reads side-on
+        const [camLng, camLat] = destinationPoint(lat, lng, 7792, 90);
+        g.pointOfView({ lat: camLat, lng: camLng, altitude: 2.1 }, 1200);
+      } else {
+        g.pointOfView({ lat, lng, altitude: 1.8 }, 1000);
+      }
       onPointClick(lat, lng);
     };
 
@@ -920,13 +929,12 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     if (!selectedPoint) return;
     const { lat, lng } = selectedPoint;
 
-    // ── DIG ──────────────────────────────────────────────────
+    // ── DIG ─ through-planet beam is drawn in a dedicated 3D effect ─
     if (mode === 'dig') {
       const anti = getAntipode(lat, lng);
-      setArcs([{ startLat: lat, startLng: lng, endLat: anti.lat, endLng: anti.lng, color: [ACCENT, CYAN] }]);
       setHtml([
         { lat, lng, color: ACCENT, kind: 'reticle', label: 'Start' },
-        { lat: anti.lat, lng: anti.lng, color: CYAN, kind: 'reticle', label: 'Antipode' },
+        { lat: anti.lat, lng: anti.lng, color: CYAN, kind: 'impact', label: 'Antipode' },
       ]);
       return;
     }
@@ -1057,6 +1065,94 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     if (mode !== 'wonders' || !wonder) return;
     globeRef.current?.pointOfView({ lat: wonder.lat, lng: wonder.lng, altitude: 1.4 }, 1400);
   }, [mode, wonder]);
+
+  // ── DIG: glowing beam straight through the planet to the antipode ─
+  useEffect(() => {
+    const g = globeRef.current;
+    if (!g) return;
+
+    const clear = () => {
+      if (digRaf.current) {
+        cancelAnimationFrame(digRaf.current);
+        digRaf.current = null;
+      }
+      if (digGroupRef.current) {
+        g.scene().remove(digGroupRef.current);
+        digGroupRef.current.traverse(o => {
+          const mesh = o as THREE.Mesh;
+          mesh.geometry?.dispose?.();
+          (mesh.material as THREE.Material | undefined)?.dispose?.();
+        });
+        digGroupRef.current = null;
+      }
+    };
+
+    if (mode !== 'dig' || !selectedPoint) {
+      clear();
+      return;
+    }
+    clear();
+
+    const R = g.getGlobeRadius();
+    const c = g.getCoords(selectedPoint.lat, selectedPoint.lng, 0) as { x: number; y: number; z: number };
+    const start = new THREE.Vector3(c.x, c.y, c.z);
+    const end = start.clone().multiplyScalar(-1); // antipode surface = opposite point
+    const len = end.clone().sub(start).length(); // = planet diameter
+    const axis = end.clone().sub(start).normalize();
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+
+    const group = new THREE.Group();
+    // x-ray beam: depthTest off so it reads straight through the globe
+    const mkTube = (radius: number, color: string, opacity: number, order: number) => {
+      const mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius, radius, len, 20, 1, true),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          depthTest: false,
+        }),
+      );
+      mesh.quaternion.copy(quat);
+      mesh.renderOrder = order; // centred at the globe's origin
+      return mesh;
+    };
+    group.add(mkTube(R * 0.05, CYAN, 0.14, 12), mkTube(R * 0.018, ACCENT, 0.85, 13));
+
+    const pulse = new THREE.Mesh(
+      new THREE.SphereGeometry(R * 0.035, 16, 16),
+      new THREE.MeshBasicMaterial({
+        color: '#ffffff',
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    );
+    pulse.renderOrder = 14;
+    pulse.position.copy(start);
+    group.add(pulse);
+
+    g.scene().add(group);
+    digGroupRef.current = group;
+
+    if (!prefersReduced()) {
+      let t = 0;
+      const tick = () => {
+        t += 0.011;
+        if (t > 1) t = 0;
+        pulse.position.lerpVectors(start, end, t);
+        (pulse.material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.5 * Math.sin(t * Math.PI);
+        digRaf.current = requestAnimationFrame(tick);
+      };
+      tick();
+    }
+
+    return clear;
+  }, [mode, selectedPoint]);
 
   // ── SPACE: pull camera back, reveal Moon + ISS ──────────────
   useEffect(() => {

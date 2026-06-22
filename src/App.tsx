@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion';
 import Globe, { type GlobeHandle } from './components/Globe';
 import Landing from './components/Landing';
+import ModeGallery from './components/ModeGallery';
 import ModeSwitcher from './components/ModeSwitcher';
 import InfoPanel from './components/InfoPanel';
 import Header from './components/Header';
@@ -26,6 +27,7 @@ export default function App() {
   const globeApi = useRef<GlobeHandle | null>(null);
 
   const [showLanding, setShowLanding] = useState(true);
+  const [showGallery, setShowGallery] = useState(false);
   const [ready, setReady] = useState(false);
   const handleReady = useCallback(() => setReady(true), []);
   // Fallback so the hero never waits forever (e.g. offline geojson fetch)
@@ -151,6 +153,20 @@ export default function App() {
     setScaleCountry(null);
   };
 
+  // Dismiss the landing; first-time visitors get the mode gallery once.
+  const enterApp = useCallback(() => {
+    setShowLanding(false);
+    if (!localStorage.getItem('orbis-gallery-seen')) {
+      localStorage.setItem('orbis-gallery-seen', '1');
+      globalThis.setTimeout(() => setShowGallery(true), 750);
+    }
+  }, []);
+
+  const handleGallerySelect = (m: Mode) => {
+    handleModeChange(m);
+    setShowGallery(false);
+  };
+
   const resetShrink = () => {
     setShrink({ source: null, target: null });
     setShrinkStage('source');
@@ -185,7 +201,7 @@ export default function App() {
         route={route}
         wonder={wonder}
         iss={iss}
-        onInteract={() => setShowLanding(false)}
+        onInteract={enterApp}
         onDoubleClick={handleLocate}
         onReady={handleReady}
       />
@@ -193,7 +209,7 @@ export default function App() {
       <div className="vignette" />
 
       <AnimatePresence>
-        {showLanding && <Landing ready={ready} onStart={() => setShowLanding(false)} />}
+        {showLanding && <Landing ready={ready} onStart={enterApp} />}
       </AnimatePresence>
 
       <AnimatePresence>
@@ -241,8 +257,14 @@ export default function App() {
               iss={iss}
             />
             <ZoomControls globe={globeApi} onLocate={handleLocate} locating={locating} />
-            <ModeSwitcher mode={mode} onChange={handleModeChange} />
+            <ModeSwitcher mode={mode} onChange={handleModeChange} onOpenGallery={() => setShowGallery(true)} />
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showGallery && !mapOpen && (
+          <ModeGallery mode={mode} onSelect={handleGallerySelect} onClose={() => setShowGallery(false)} />
         )}
       </AnimatePresence>
 
