@@ -65,25 +65,13 @@ const MOTIFS: Record<Mode, React.ReactNode> = {
       <circle cx={60} cy={36} r={4.5} fill={A2} />
     </>
   ),
-  scale: (
+  truesize: (
     <>
-      <rect x={48} y={28} width={20} height={18} fill={A} opacity={0.28} />
-      <rect className="mp-grow" x={38} y={16} width={44} height={40} fill="none" stroke={A} strokeWidth={2} />
+      <rect x={48} y={30} width={20} height={16} fill={A} opacity={0.28} />
+      <rect className="mp-grow" x={36} y={16} width={48} height={40} fill="none" stroke={A} strokeWidth={2} />
     </>
   ),
-  shrinkray: (
-    <rect className="mp-grow" x={40} y={18} width={40} height={36} rx={7} fill={A} opacity={0.28} stroke={A} strokeWidth={2} />
-  ),
-  flightradius: (
-    <>
-      <circle className="mp-ping" cx={60} cy={40} r={20} fill="none" stroke={A} strokeWidth={2} />
-      <circle cx={38} cy={30} r={2.4} fill={A} opacity={0.7} />
-      <circle cx={84} cy={34} r={2.4} fill={A} opacity={0.7} />
-      <circle cx={70} cy={54} r={2.4} fill={A} opacity={0.7} />
-      <circle cx={60} cy={40} r={4} fill={A2} />
-    </>
-  ),
-  flightroute: (
+  flight: (
     <>
       <path d="M28,54 Q60,6 92,40" fill="none" stroke={A2} strokeWidth={2} strokeDasharray="3 3" opacity={0.6} />
       <circle cx={28} cy={54} r={3.5} fill={A} />

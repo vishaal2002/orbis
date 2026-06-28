@@ -6,9 +6,7 @@ import {
   Plane,
   Stamp,
   Thermometer,
-  Shrink,
   GitCompareArrows,
-  Route,
   Mountain,
   Rocket,
   LineChart,
@@ -46,26 +44,16 @@ export const MODE_META: Record<Mode, ModeMeta> = {
     blurb: 'Simulate an asteroid impact',
     example: 'Drop a city-killer on London',
   },
-  scale: {
-    id: 'scale', icon: Layers, label: 'Scale', group: 'Explore',
-    blurb: 'True country size vs the flat map',
+  truesize: {
+    id: 'truesize', icon: Layers, label: 'True Size', group: 'Explore',
+    blurb: 'Real country size vs the flat map',
     example: 'India is 3× bigger than it looks',
     recommended: true,
   },
-  shrinkray: {
-    id: 'shrinkray', icon: Shrink, label: 'Shrink', group: 'Explore',
-    blurb: 'Compare countries by real area',
-    example: 'Drop Japan onto California',
-  },
-  flightradius: {
-    id: 'flightradius', icon: Plane, label: 'Radius', group: 'Explore',
-    blurb: 'How far can you fly from here?',
+  flight: {
+    id: 'flight', icon: Plane, label: 'Flight', group: 'Explore',
+    blurb: 'How far you can fly, and routes',
     example: '6 hours out of Dubai',
-  },
-  flightroute: {
-    id: 'flightroute', icon: Route, label: 'Route', group: 'Explore',
-    blurb: 'Plot a great-circle flight path',
-    example: 'Tokyo → New York, the real way',
   },
   compare: {
     id: 'compare', icon: GitCompareArrows, label: 'Compare', group: 'Data',
@@ -113,7 +101,7 @@ export const MODE_META: Record<Mode, ModeMeta> = {
 };
 
 export const MODE_GROUPS: { label: ModeGroup; modes: Mode[] }[] = [
-  { label: 'Explore', modes: ['dig', 'blast', 'scale', 'shrinkray', 'flightradius', 'flightroute'] },
+  { label: 'Explore', modes: ['dig', 'blast', 'truesize', 'flight'] },
   { label: 'Data', modes: ['compare', 'timeline', 'population', 'climatetwin', 'visa'] },
   { label: 'Sky', modes: ['daynight', 'wonders', 'space'] },
 ];

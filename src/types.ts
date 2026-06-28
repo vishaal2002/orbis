@@ -1,20 +1,21 @@
 // EarthLens — shared type definitions
 
 export type Mode =
-  | 'scale'
+  | 'truesize'
   | 'dig'
   | 'blast'
   | 'daynight'
   | 'visa'
-  | 'flightradius'
+  | 'flight'
   | 'climatetwin'
-  | 'shrinkray'
   | 'compare'
-  | 'flightroute'
   | 'wonders'
   | 'space'
   | 'timeline'
   | 'population';
+
+/** Flight has two sub-modes: a reach circle, or a route between two cities. */
+export type FlightMode = 'reach' | 'route';
 
 /** Curated, accurate country facts for Compare mode. */
 export interface CountryFact {
@@ -139,10 +140,11 @@ export interface ClimateTwin {
   similarity: number; // 0–100 %
 }
 
-// ── Country shrink-ray mode ────────────────────────────────────
+// ── True Size mode (inspect a country, then drop it on another) ─
 export interface CountryInfo {
   name: string;
   areaKm2: number;
+  lat?: number; // centroid latitude — for the Mercator-inflation reveal
 }
 
 export interface ShrinkState {

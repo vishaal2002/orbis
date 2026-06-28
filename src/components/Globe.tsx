@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import GlobeGL, { type GlobeInstance } from 'globe.gl';
 import * as turf from '@turf/turf';
 import type { Feature, FeatureCollection, Geometry, Polygon, MultiPolygon } from 'geojson';
-import type { Mode, LatLng, BlastType, ShrinkState, CountryInfo, City, Wonder, ISSPosition } from '../types';
+import type { Mode, LatLng, BlastType, ShrinkState, City, Wonder, ISSPosition, FlightMode } from '../types';
 import { useTheme } from '../theme';
 import {
   getAntipode,
@@ -47,9 +47,25 @@ const ATMO = {
   light: { color: '#bcd8ff', alt: 0.26 },
 } as const;
 
-// Camera handoff to the 2D satellite map on deep zoom
-const HANDOFF_ALT = 0.3;
+// ── Globe zoom boundary (single source of truth) ───────────────
+// HANDOFF_ALT is the globe's deepest zoom: at this altitude the 2D satellite
+// map takes over — the same way for scroll, pinch, AND the zoom-in button.
+// Above REARM_ALT the globe re-arms. minDistance sits just inside the handoff
+// so the boundary is always crossable and the globe never silently overshoots it.
+const GLOBE_UNITS = 100; // three-globe globe radius, in scene units
+const HANDOFF_ALT = 0.2;
 const REARM_ALT = 0.7;
+const GLOBE_MIN_DISTANCE = GLOBE_UNITS * (1 + HANDOFF_ALT) - 4; // = 116
+
+// Run non-critical work when the main thread is idle (keeps the first paint
+// and the cinematic fly-in smooth on weaker devices). Falls back to a timer.
+function idleCall(cb: () => void): void {
+  const w = globalThis as unknown as {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  };
+  if (w.requestIdleCallback) w.requestIdleCallback(cb, { timeout: 2500 });
+  else globalThis.setTimeout(cb, 1200);
+}
 
 export interface GlobeHandle {
   zoomIn: () => void;
@@ -157,7 +173,7 @@ interface GlobeProps {
   onShrinkUpdate: (s: ShrinkState) => void;
   onEnterMap: (lat: number, lng: number) => void;
   mapOpen: boolean;
-  onScaleInfo: (info: CountryInfo | null) => void;
+  flightMode: FlightMode;
   compareCodes: [string, string];
   timelineCode: string;
   route: { from: City | null; to: City | null };
@@ -182,7 +198,7 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     onShrinkUpdate,
     onEnterMap,
     mapOpen,
-    onScaleInfo,
+    flightMode,
     compareCodes,
     timelineCode,
     route,
@@ -192,8 +208,6 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     onDoubleClick,
     onReady,
   } = props;
-  const onScaleInfoRef = useRef(onScaleInfo);
-  onScaleInfoRef.current = onScaleInfo;
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
 
@@ -218,6 +232,8 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
   onEnterMapRef.current = onEnterMap;
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  const flightModeRef = useRef(flightMode);
+  flightModeRef.current = flightMode;
   const isLandingRef = useRef(isLanding);
   isLandingRef.current = isLanding;
   const onInteractRef = useRef(onInteract);
@@ -227,6 +243,10 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
   const dustRef = useRef<THREE.Points | null>(null);
   const lifeRaf = useRef<number | null>(null);
   const pointerTarget = useRef({ x: 0, y: 0 });
+  // [west, south, east, north] per country — cheap reject before point-in-polygon
+  const bboxRef = useRef<[number, number, number, number][]>([]);
+  // throttle rapid re-fires that thrash overlapping camera tweens (stutter)
+  const lastClickAt = useRef(0);
 
   const [countries, setCountries] = useState<Feature[]>([]);
   const [shrinkPolys, setShrinkPolys] = useState<PolyDatum[]>([]);
@@ -254,9 +274,17 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
   useEffect(() => {
     if (!containerRef.current) return;
     const reduceMotion = prefersReduced();
+    // Detect weaker devices so we can lighten first load (deferred/skip textures,
+    // a shorter fly-in). Defaults assume a capable device when the API is absent.
+    const nav = navigator as Navigator & { deviceMemory?: number };
+    const lowEnd = (nav.deviceMemory ?? 8) <= 4 || (nav.hardwareConcurrency ?? 8) <= 4;
+    let disposed = false;
+    const whenIdle = (cb: () => void) => idleCall(() => { if (!disposed) cb(); });
+
+    // Only the colour map loads on the critical path; relief/oceans/clouds are
+    // deferred so the first paint + fly-in aren't fighting extra 4K decodes.
     const globe = new GlobeGL(containerRef.current)
       .globeImageUrl(COLOR_URL)
-      .bumpImageUrl(BUMP_URL)
       .backgroundColor('rgba(0,0,0,0)')
       .width(globalThis.innerWidth)
       .height(globalThis.innerHeight)
@@ -270,23 +298,28 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     controls.rotateSpeed = 0.6;
     controls.enableZoom = true;
     controls.zoomSpeed = 0.9;
-    controls.minDistance = 105; // just above the surface → tight zoom-in allowed
+    controls.minDistance = GLOBE_MIN_DISTANCE; // floor sits just inside the map handoff
     controls.maxDistance = 600;
     globeRef.current = globe;
 
-    // glossy oceans (specular map on the globe's Phong material)
-    new THREE.TextureLoader().load(
-      WATER_URL,
-      tex => {
-        const mat = globe.globeMaterial() as THREE.MeshPhongMaterial;
-        mat.specularMap = tex;
-        mat.specular = new THREE.Color('#1b2a38');
-        mat.shininess = 14;
-        mat.needsUpdate = true;
-      },
-      undefined,
-      () => undefined,
-    );
+    // relief (bump) + glossy oceans (specular map) — deferred to idle so they
+    // don't compete with the first paint and the cinematic fly-in
+    whenIdle(() => {
+      globe.bumpImageUrl(BUMP_URL);
+      new THREE.TextureLoader().load(
+        WATER_URL,
+        tex => {
+          if (disposed) { tex.dispose(); return; }
+          const mat = globe.globeMaterial() as THREE.MeshPhongMaterial;
+          mat.specularMap = tex;
+          mat.specular = new THREE.Color('#1b2a38');
+          mat.shininess = 14;
+          mat.needsUpdate = true;
+        },
+        undefined,
+        () => undefined,
+      );
+    });
 
     // hand off to the 2D satellite map once the user zooms in deep
     globe.onZoom((pov: { lat: number; lng: number; altitude: number }) => {
@@ -305,32 +338,42 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     let flyIn2: ReturnType<typeof setTimeout> | undefined;
     if (reduceMotion) {
       globe.pointOfView({ lat: 22, lng: 14, altitude: 2.3 }, 0);
+    } else if (lowEnd) {
+      // weaker device: one short approach instead of the long multi-stage fly-in
+      globe.pointOfView({ lat: 10, lng: -20, altitude: 4.2 }, 0);
+      flyIn1 = setTimeout(() => globe.pointOfView({ lat: 22, lng: 14, altitude: 2.3 }, 1600), 200);
     } else {
       globe.pointOfView({ lat: 4, lng: -34, altitude: 5.4 }, 0);
       flyIn1 = setTimeout(() => globe.pointOfView({ lat: 15, lng: -8, altitude: 3.4 }, 2600), 250);
       flyIn2 = setTimeout(() => globe.pointOfView({ lat: 22, lng: 14, altitude: 2.3 }, 3200), 2500);
     }
 
-    // soft volumetric cloud shell (optional — silently skipped if unavailable)
-    new THREE.TextureLoader().load(
-      CLOUDS_URL,
-      tex => {
-        const radius = globe.getGlobeRadius() * (1 + CLOUDS_ALT);
-        const clouds = new THREE.Mesh(
-          new THREE.SphereGeometry(radius, 96, 96),
-          new THREE.MeshPhongMaterial({ map: tex, transparent: true, opacity: 0.8, depthWrite: false }),
+    // soft volumetric cloud shell — deferred to idle, and skipped on low-end
+    // devices (silently skipped if the texture is unavailable)
+    if (!lowEnd) {
+      whenIdle(() => {
+        new THREE.TextureLoader().load(
+          CLOUDS_URL,
+          tex => {
+            if (disposed) { tex.dispose(); return; }
+            const radius = globe.getGlobeRadius() * (1 + CLOUDS_ALT);
+            const clouds = new THREE.Mesh(
+              new THREE.SphereGeometry(radius, 96, 96),
+              new THREE.MeshPhongMaterial({ map: tex, transparent: true, opacity: 0.8, depthWrite: false }),
+            );
+            globe.scene().add(clouds);
+            cloudsRef.current = clouds;
+            const spin = () => {
+              clouds.rotation.y += (CLOUDS_ROTATION * Math.PI) / 180;
+              cloudsRaf.current = requestAnimationFrame(spin);
+            };
+            if (!reduceMotion) spin();
+          },
+          undefined,
+          () => undefined,
         );
-        globe.scene().add(clouds);
-        cloudsRef.current = clouds;
-        const spin = () => {
-          clouds.rotation.y += (CLOUDS_ROTATION * Math.PI) / 180;
-          cloudsRaf.current = requestAnimationFrame(spin);
-        };
-        if (!reduceMotion) spin();
-      },
-      undefined,
-      () => undefined,
-    );
+      });
+    }
 
     // space view: Moon + orbit ring (hidden until Space mode)
     {
@@ -447,6 +490,7 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
       .catch(() => onReadyRef.current());
 
     return () => {
+      disposed = true;
       if (flyIn1) clearTimeout(flyIn1);
       if (flyIn2) clearTimeout(flyIn2);
       globalThis.removeEventListener('resize', onResize);
@@ -504,18 +548,34 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     });
   }, [applyDayNightGlobe]);
 
+  // ── cache each country's bounding box for fast click hit-testing ──
+  useEffect(() => {
+    bboxRef.current = countries.map(f => {
+      try {
+        return turf.bbox(f) as [number, number, number, number];
+      } catch {
+        return [180, 90, -180, -90]; // degenerate box → never contains a point
+      }
+    });
+  }, [countries]);
+
   // ── build NASA-style night lights texture from countries + city data ──
+  // Deferred to idle: it's a heavy canvas build only needed for Day/Night,
+  // so it must not compete with the intro on weaker devices.
   useEffect(() => {
     if (countries.length === 0 || nightTexRef.current) return;
     let cancelled = false;
-    createNightLightsTexture(countries).then(tex => {
-      if (cancelled) {
-        tex.dispose();
-        return;
-      }
-      nightTexRef.current = tex;
-      if (modeRef.current === 'daynight') applyDayNightGlobe();
-    }).catch(() => undefined);
+    idleCall(() => {
+      if (cancelled || nightTexRef.current) return;
+      createNightLightsTexture(countries).then(tex => {
+        if (cancelled) {
+          tex.dispose();
+          return;
+        }
+        nightTexRef.current = tex;
+        if (modeRef.current === 'daynight') applyDayNightGlobe();
+      }).catch(() => undefined);
+    });
     return () => {
       cancelled = true;
     };
@@ -538,7 +598,14 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
       const g = globeRef.current;
       if (!g) return;
       const pov = g.pointOfView();
-      g.pointOfView({ altitude: Math.max((pov.altitude ?? 2) * 0.6, 0.22) }, 450);
+      const next = (pov.altitude ?? 2) * 0.6;
+      // at the boundary, the button hands off to the 2D map — same as scroll/pinch
+      if (next <= HANDOFF_ALT && armedRef.current && !mapOpenRef.current) {
+        armedRef.current = false;
+        onEnterMapRef.current(pov.lat ?? 0, pov.lng ?? 0);
+        return;
+      }
+      g.pointOfView({ altitude: Math.max(next, HANDOFF_ALT) }, 450);
     },
     zoomOut() {
       const g = globeRef.current;
@@ -599,14 +666,14 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     // Radius/blast fill polygons sit above the globe and block re-clicks inside the area.
     g.pointerEventsFilter(obj => {
       const t = (obj as { __globeObjType?: string }).__globeObjType;
-      if ((mode === 'flightradius' || mode === 'blast') && t === 'polygon') return false;
+      if ((mode === 'flight' || mode === 'blast') && t === 'polygon') return false;
       return true;
     });
 
     const selectPoint = (lat: number, lng: number) => {
       pauseRotateThenResume();
 
-      if (mode === 'shrinkray') {
+      if (mode === 'truesize') {
         handleShrinkClick(lat, lng);
         return;
       }
@@ -622,11 +689,15 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
     };
 
     g.onGlobeClick(({ lat, lng }: { lat: number; lng: number }) => {
+      // ignore rapid re-fires that stack competing camera tweens (stutter)
+      const now = performance.now();
+      if (now - lastClickAt.current < 200) return;
+      lastClickAt.current = now;
       selectPoint(lat, lng);
     });
 
     g.onPointClick((pt: object, _ev, coords) => {
-      if (mode !== 'flightradius') return;
+      if (mode !== 'flight' || flightModeRef.current !== 'reach') return;
       const p = pt as PointDatum;
       selectPoint(p.lat ?? coords.lat, p.lng ?? coords.lng);
     });
@@ -636,9 +707,18 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
 
   function findCountryAt(lat: number, lng: number): Feature | null {
     const pt = turf.point([lng, lat]);
-    for (const f of countries) {
+    const boxes = bboxRef.current;
+    const useBox = boxes.length === countries.length;
+    for (let i = 0; i < countries.length; i++) {
+      // cheap bounding-box reject before the expensive point-in-polygon test
+      if (useBox) {
+        const b = boxes[i];
+        if (lng < b[0] || lng > b[2] || lat < b[1] || lat > b[3]) continue;
+      }
       try {
-        if (turf.booleanPointInPolygon(pt, f as Feature<Polygon | MultiPolygon>)) return f;
+        if (turf.booleanPointInPolygon(pt, countries[i] as Feature<Polygon | MultiPolygon>)) {
+          return countries[i];
+        }
       } catch {
         /* skip non-polygon features */
       }
@@ -660,7 +740,7 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
       const c = turf.centroid(f).geometry.coordinates as [number, number];
       shrinkSource.current = { feature: f, centroid: c };
       setShrinkPolys([{ feat: f, cap: 'rgba(79,172,254,0.35)', side: 'rgba(79,172,254,0.15)', stroke: ACCENT, alt: 0.012 }]);
-      onShrinkUpdate({ source: { name: cName(f), areaKm2: areaKm2(f) }, target: null });
+      onShrinkUpdate({ source: { name: cName(f), areaKm2: areaKm2(f), lat: c[1] }, target: null });
       g.pointOfView({ lat: c[1], lng: c[0], altitude: 1.9 }, 1000);
     } else {
       const src = shrinkSource.current;
@@ -679,7 +759,7 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
         { feat: ghost, cap: 'rgba(0,242,254,0.25)', side: 'rgba(0,242,254,0.12)', stroke: CYAN, alt: 0.02 },
       ]);
       onShrinkUpdate({
-        source: { name: cName(src.feature), areaKm2: areaKm2(src.feature) },
+        source: { name: cName(src.feature), areaKm2: areaKm2(src.feature), lat: src.centroid[1] },
         target: { name: targetName, areaKm2: targetArea },
       });
       g.pointOfView({ lat, lng, altitude: 1.9 }, 1000);
@@ -822,8 +902,8 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
       return;
     }
 
-    // ── SHRINK RAY: driven by click handler state ────────────
-    if (mode === 'shrinkray') {
+    // ── TRUE SIZE: driven by click handler state (pick up → drop) ──
+    if (mode === 'truesize') {
       setPolys(shrinkPolys).polygonsTransitionDuration(700);
       return;
     }
@@ -855,8 +935,8 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
       return;
     }
 
-    // ── FLIGHT RADIUS ────────────────────────────────────────
-    if (mode === 'flightradius') {
+    // ── FLIGHT · REACH ───────────────────────────────────────
+    if (mode === 'flight' && flightMode === 'reach') {
       if (!selectedPoint) return;
       const radiusKm = flightHours * CRUISE_KMH;
       const ring = generateCirclePolygon(selectedPoint.lat, selectedPoint.lng, radiusKm);
@@ -898,8 +978,8 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
       return;
     }
 
-    // ── FLIGHT ROUTE: animated great-circle arc ──────────────
-    if (mode === 'flightroute') {
+    // ── FLIGHT · ROUTE: animated great-circle arc ────────────
+    if (mode === 'flight' && flightMode === 'route') {
       const { from, to } = route;
       if (from && to) {
         setArcs([{ startLat: from.lat, startLng: from.lng, endLat: to.lat, endLng: to.lng, color: [ACCENT, CYAN] }]);
@@ -964,31 +1044,7 @@ const Globe = forwardRef<GlobeHandle, GlobeProps>(function Globe(props, ref) {
       return;
     }
 
-    // ── SCALE ─ highlight country, report its true size ──────
-    if (mode === 'scale') {
-      const f = findCountryAt(lat, lng);
-      if (f) {
-        const c = turf.centroid(f).geometry.coordinates as [number, number];
-        setPolys([
-          {
-            feat: f,
-            cap: hexA(ACCENT, 0.32),
-            side: hexA(ACCENT, 0.14),
-            stroke: ACCENT,
-            alt: 0.012,
-            label: tip(cName(f), `${Math.round(areaKm2(f)).toLocaleString()} km²`),
-          },
-        ]).polygonsTransitionDuration(450);
-        setHtml([{ lat: c[1], lng: c[0], color: ACCENT, kind: 'reticle', label: cName(f) }]);
-        onScaleInfoRef.current({ name: cName(f), areaKm2: areaKm2(f) });
-      } else {
-        setHtml([{ lat, lng, color: ACCENT, kind: 'reticle' }]);
-        onScaleInfoRef.current(null);
-      }
-      return;
-    }
-
-  }, [mode, selectedPoint, blastType, passportCode, flightHours, countries, shrinkPolys, theme, dim, compareCodes, timelineCode, route, wonder]);
+  }, [mode, flightMode, selectedPoint, blastType, passportCode, flightHours, countries, shrinkPolys, theme, dim, compareCodes, timelineCode, route, wonder]);
 
   // ── DAY / NIGHT: swap globe to day/night shader with live terminator ─
   useEffect(() => {

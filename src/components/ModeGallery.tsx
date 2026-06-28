@@ -51,7 +51,7 @@ export default function ModeGallery({ mode, onSelect, onClose }: Readonly<ModeGa
         <header className="gallery-head">
           <div>
             <h2 className="gallery-title">Choose your <em>lens</em></h2>
-            <p className="gallery-sub">Fourteen ways to explore Earth — pick one to begin.</p>
+            <p className="gallery-sub">Twelve ways to explore Earth — pick one to begin.</p>
           </div>
           <button className="icon-btn" onClick={onClose} aria-label="Close" type="button">
             <X size={18} strokeWidth={2} />

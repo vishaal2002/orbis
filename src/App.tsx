@@ -9,7 +9,7 @@ import Header from './components/Header';
 import StarField from './components/StarField';
 import ZoomControls from './components/ZoomControls';
 import Toast from './components/Toast';
-import type { Mode, LatLng, BlastType, ShrinkState, CountryInfo, City, Wonder, ISSPosition } from './types';
+import type { Mode, LatLng, BlastType, ShrinkState, City, Wonder, ISSPosition, FlightMode } from './types';
 
 // MapLibre is heavy — only load it when the user actually zooms into the map
 const MapView = lazy(() => import('./components/MapView'));
@@ -20,7 +20,7 @@ import { useTheme } from './theme';
 const cityByName = (name: string): City => CITIES.find(c => c.name === name) ?? CITIES[0];
 
 // Modes that only come alive after the user clicks a spot on the globe.
-const CLICK_MODES = new Set<Mode>(['dig', 'blast', 'scale', 'climatetwin', 'flightradius', 'shrinkray']);
+const CLICK_MODES = new Set<Mode>(['dig', 'blast', 'truesize', 'climatetwin', 'flight']);
 
 export default function App() {
   const { theme } = useTheme();
@@ -59,14 +59,12 @@ export default function App() {
 
   const [passportCode, setPassportCode] = useState('US');
   const [flightHours, setFlightHours] = useState(6);
+  const [flightMode, setFlightMode] = useState<FlightMode>('reach');
   const [shrink, setShrink] = useState<ShrinkState>({ source: null, target: null });
   const [shrinkStage, setShrinkStage] = useState<'source' | 'target'>('source');
 
   const [mapTarget, setMapTarget] = useState<LatLng | null>(null);
   const mapOpen = mapTarget !== null;
-
-  const [scaleCountry, setScaleCountry] = useState<CountryInfo | null>(null);
-  const handleScaleInfo = useCallback((info: CountryInfo | null) => setScaleCountry(info), []);
 
   const [compareCodes, setCompareCodes] = useState<[string, string]>(['IN', 'CN']);
   const [timelineCode, setTimelineCode] = useState('IN');
@@ -150,7 +148,6 @@ export default function App() {
     setSelectedPoint(null);
     setShrink({ source: null, target: null });
     setShrinkStage('source');
-    setScaleCountry(null);
   };
 
   // Dismiss the landing; first-time visitors get the mode gallery once.
@@ -173,7 +170,12 @@ export default function App() {
   };
 
   const chromeVisible = !showLanding && !mapOpen;
-  const needsClick = CLICK_MODES.has(mode) && (mode === 'shrinkray' ? !shrink.source : !selectedPoint);
+  let needsClick = CLICK_MODES.has(mode);
+  if (needsClick) {
+    if (mode === 'truesize') needsClick = !shrink.source;
+    else if (mode === 'flight') needsClick = flightMode === 'reach' && !selectedPoint;
+    else needsClick = !selectedPoint;
+  }
   const showClickHint = chromeVisible && needsClick;
 
   return (
@@ -195,7 +197,7 @@ export default function App() {
         onShrinkUpdate={setShrink}
         onEnterMap={handleEnterMap}
         mapOpen={mapOpen}
-        onScaleInfo={handleScaleInfo}
+        flightMode={flightMode}
         compareCodes={compareCodes}
         timelineCode={timelineCode}
         route={route}
@@ -241,11 +243,12 @@ export default function App() {
               onPassportChange={setPassportCode}
               flightHours={flightHours}
               onFlightHoursChange={setFlightHours}
+              flightMode={flightMode}
+              onFlightModeChange={setFlightMode}
               shrink={shrink}
               shrinkStage={shrinkStage}
               onAdvanceShrink={() => setShrinkStage('target')}
               onResetShrink={resetShrink}
-              scaleCountry={scaleCountry}
               compareCodes={compareCodes}
               onCompareChange={handleCompareChange}
               timelineCode={timelineCode}
@@ -277,7 +280,9 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.4 }}
-            aria-hidden="true"
+            role="status"
+            aria-live="polite"
+            aria-label="Click anywhere on the globe to begin"
           >
             <span className="click-hint-dot" />
             <span className="click-hint-ring" />

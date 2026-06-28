@@ -322,12 +322,24 @@ body {
 }
 .panel-handle {
   display: none;
-  width: 36px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 0 6px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.panel-handle-bar {
+  display: block;
+  width: 40px;
   height: 4px;
   border-radius: var(--r-pill);
   background: var(--hairline);
   margin: 0 auto var(--s4);
+  transition: background-color var(--dur-fast), width var(--dur-fast);
 }
+.info-panel.collapsed .panel-handle-bar { background: var(--accent); width: 52px; }
 .panel-divider {
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--hairline), transparent);
@@ -788,6 +800,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--s1);
+  max-width: 100%; /* never let the bar overflow the viewport on small windows */
   padding: var(--s2);
   border-radius: var(--r-2xl);
   background: var(--glass-bg);
@@ -796,6 +809,42 @@ body {
   border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-lg);
 }
+
+/* Compact dock — a single launcher that opens the full-screen gallery.
+   Used on narrow screens and small desktop windows where the full dock
+   would overflow. */
+.dock-launch {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 12px 7px 8px;
+  border: none;
+  border-radius: var(--r-xl);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--dur-fast);
+}
+.dock-launch:hover { background: var(--surface-hover); }
+.dock-launch:active { transform: scale(0.99); }
+.dock-launch-icon {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center; flex-shrink: 0;
+  background: var(--accent-soft); color: var(--accent);
+}
+.dock-launch-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.12; text-align: left; min-width: 0; }
+.dock-launch-name {
+  font-family: var(--font-display); font-size: 14.5px; font-weight: 650;
+  letter-spacing: -0.02em; color: var(--text-strong);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dock-launch-hint {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+}
+.dock-launch-grid { color: var(--muted); flex-shrink: 0; margin: 0 var(--s2) 0 var(--s1); }
+.dock--compact .dock-bar { min-width: 230px; padding: var(--s1) var(--s2); gap: var(--s1); }
 .dock-tabs {
   display: flex;
   gap: 2px;
@@ -827,6 +876,7 @@ body {
   display: flex;
   align-items: center;
   gap: 2px;
+  min-width: 0; /* allow the strip to shrink + scroll instead of pushing the bar wide */
   padding: 0 var(--s1);
   max-width: min(520px, calc(100vw - 140px));
   overflow-x: auto;
@@ -1024,18 +1074,59 @@ body {
 /* ── 2D satellite map ──────────────────────────────────────────── */
 .map-view { position: fixed; inset: 0; z-index: 60; background: var(--bg); }
 .map-view canvas { outline: none; }
+
+/* Cinematic grade over the raw imagery so it matches the globe's look */
+.map-grade {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background:
+    radial-gradient(ellipse 90% 85% at 50% 45%, transparent 55%, rgba(3, 6, 12, 0.42) 100%),
+    linear-gradient(180deg, rgba(3, 6, 12, 0.28) 0%, transparent 18%, transparent 82%, rgba(3, 6, 12, 0.34) 100%);
+}
+
+/* Solid, high-contrast pill — readable over ANY satellite imagery and on
+   devices without backdrop-filter (the old glass pill vanished over bright terrain) */
 .map-back {
   position: absolute;
   top: calc(var(--safe-top) + var(--s5));
   left: calc(var(--safe-left) + var(--s5));
   z-index: 5;
-  display: flex; align-items: center; gap: var(--s2);
-  padding: 10px 16px 10px 13px;
-  border: none; cursor: pointer; color: var(--text-strong);
-  font-family: var(--font-display); font-size: 13.5px; font-weight: 600; letter-spacing: -0.012em;
-  transition: transform var(--dur-fast) var(--ease-spring);
+  display: inline-flex; align-items: center; gap: var(--s2);
+  min-height: 44px;
+  padding: 10px 18px 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  color: #ffffff;
+  background: rgba(10, 14, 22, 0.84);
+  box-shadow: 0 8px 26px -8px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(0, 0, 0, 0.28);
+  font-family: var(--font-display); font-size: 14px; font-weight: 600; letter-spacing: -0.012em;
+  transition: transform var(--dur-fast) var(--ease-spring), background-color var(--dur-fast);
 }
-.map-back:hover { transform: translateX(-3px); }
+.map-back:hover { transform: translateX(-3px); background: rgba(18, 24, 36, 0.92); }
+
+/* Place name — gives the satellite view context (continuity with the globe) */
+.map-place {
+  position: absolute;
+  top: calc(var(--safe-top) + var(--s5));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: inline-flex; align-items: center; gap: var(--s2);
+  max-width: min(70vw, 420px);
+  padding: 9px 16px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(10, 14, 22, 0.78);
+  color: #f3f6fb;
+  font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 8px 26px -10px rgba(0, 0, 0, 0.7);
+}
+.map-place-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent);
+  box-shadow: 0 0 10px 1px var(--accent-glow);
+}
 .maplibregl-ctrl-group {
   background: var(--glass-bg-strong) !important;
   border: 1px solid var(--glass-border) !important;
@@ -1071,15 +1162,22 @@ body {
   .landing-brand-sub { display: none; }
   .landing-kbd-hint { display: none; }
   .landing-footer { padding-top: var(--s2); }
-  .info-panel {
+  .info-panel.sheet {
     top: auto !important;
     right: calc(var(--safe-right) + var(--s2)) !important;
     left: calc(var(--safe-left) + var(--s2)) !important;
-    bottom: calc(var(--safe-bottom) + 96px) !important;
+    bottom: calc(var(--safe-bottom) + 72px) !important;
     width: auto !important;
-    max-height: 48vh;
-    padding: var(--s4) var(--s5) var(--s5);
-    border-radius: var(--r-2xl) var(--r-2xl) var(--r-xl) var(--r-xl) !important;
+    max-height: min(56vh, 440px);
+    padding: var(--s2) var(--s5) var(--s5);
+    border-radius: var(--r-2xl) !important;
+    transition: max-height 0.42s var(--ease-out), padding 0.42s var(--ease-out);
+  }
+  /* peek: just the handle + the title / location line, so the globe stays visible */
+  .info-panel.sheet.collapsed {
+    max-height: 96px;
+    overflow: hidden;
+    padding-bottom: var(--s2);
   }
   .panel-handle { display: block; }
   .dock {
@@ -1102,6 +1200,29 @@ body {
 
 @media (min-width: 769px) and (max-width: 1100px) {
   .info-panel { width: min(280px, calc(100vw - var(--s8))); }
+}
+
+/* Short windows (e.g. resized desktop / landscape): keep the top-right panel
+   clear of the dock and drop the zoom cluster so corners don't crowd. */
+@media (min-width: 769px) and (max-height: 600px) {
+  .info-panel {
+    top: calc(var(--safe-top) + var(--s3));
+    max-height: calc(100vh - var(--safe-top) - 96px);
+  }
+  .zoom-cluster { display: none; }
+}
+
+/* Landscape phone: a full-width bottom sheet would swallow the short viewport,
+   so dock the panel to the right as a compact column and keep the globe visible. */
+@media (max-width: 768px) and (max-height: 500px) {
+  .info-panel.sheet {
+    left: auto !important;
+    right: calc(var(--safe-right) + var(--s2)) !important;
+    bottom: calc(var(--safe-bottom) + var(--s2)) !important;
+    width: min(300px, 52vw) !important;
+    max-height: calc(100vh - var(--safe-top) - var(--safe-bottom) - var(--s4));
+  }
+  .info-panel.sheet.collapsed { max-height: 92px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

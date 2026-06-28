@@ -4,6 +4,7 @@ import { Sun, Moon, LayoutGrid } from 'lucide-react';
 import type { Mode } from '../types';
 import { MODE_META, MODE_GROUPS } from '../modes';
 import { useTheme } from '../theme';
+import { useMediaQuery } from '../lib/useMediaQuery';
 
 interface ModeSwitcherProps {
   mode: Mode;
@@ -13,6 +14,9 @@ interface ModeSwitcherProps {
 
 export default function ModeSwitcher({ mode, onChange, onOpenGallery }: Readonly<ModeSwitcherProps>) {
   const { theme, toggle } = useTheme();
+  // Narrow screens (and small desktop windows): the full dock overflows, so
+  // collapse to a compact launcher that opens the full-screen gallery.
+  const compact = useMediaQuery('(max-width: 900px)');
   const [activeGroup, setActiveGroup] = useState(() =>
     Math.max(0, MODE_GROUPS.findIndex(g => g.modes.includes(mode))),
   );
@@ -28,6 +32,40 @@ export default function ModeSwitcher({ mode, onChange, onOpenGallery }: Readonly
   }, [mode, activeGroup]);
 
   const group = MODE_GROUPS[activeGroup];
+
+  if (compact) {
+    const active = MODE_META[mode];
+    const ActiveIcon = active.icon;
+    return (
+      <motion.div
+        className="dock dock--compact"
+        initial={{ opacity: 0, y: 32 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <div className="dock-bar">
+          <button className="dock-launch" onClick={onOpenGallery} type="button" aria-label="Choose a mode">
+            <span className="dock-launch-icon"><ActiveIcon size={18} strokeWidth={2.1} /></span>
+            <span className="dock-launch-text">
+              <span className="dock-launch-name">{active.label}</span>
+              <span className="dock-launch-hint">Tap to switch modes</span>
+            </span>
+            <LayoutGrid size={16} strokeWidth={2} className="dock-launch-grid" />
+          </button>
+
+          <button
+            className="icon-btn dock-theme"
+            onClick={toggle}
+            title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+            aria-label="Toggle theme"
+            type="button"
+          >
+            {theme === 'dark' ? <Moon size={17} strokeWidth={2} /> : <Sun size={17} strokeWidth={2} />}
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div

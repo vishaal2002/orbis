@@ -167,6 +167,7 @@ export default function Landing({ ready, onStart }: Readonly<LandingProps>) {
               onMouseMove={onCtaMove}
               onMouseLeave={onCtaLeave}
               style={{ x: mx, y: my }}
+              aria-label="Enter Orbis"
             >
               <span className="landing-enter-label">Enter Orbis</span>
               <span className="landing-enter-arrow">

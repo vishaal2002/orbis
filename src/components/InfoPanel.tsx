@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { Mode, LatLng, BlastType, ShrinkState, CountryInfo, City, Wonder, ISSPosition, WeatherInfo } from '../types';
+import { useMediaQuery } from '../lib/useMediaQuery';
+import type { Mode, LatLng, BlastType, ShrinkState, City, Wonder, ISSPosition, WeatherInfo, FlightMode } from '../types';
 import {
   getLocationLabel,
   getAntipode,
@@ -16,7 +17,6 @@ import {
   isDaylight,
   hiroshimaEquivalent,
   mercatorAreaFactor,
-  mercatorLinearFactor,
   getScaleComparisons,
   EARTH_LAND_AREA,
   PASSPORT_LIST,
@@ -52,11 +52,12 @@ interface InfoPanelProps {
   onPassportChange: (code: string) => void;
   flightHours: number;
   onFlightHoursChange: (h: number) => void;
+  flightMode: FlightMode;
+  onFlightModeChange: (m: FlightMode) => void;
   shrink: ShrinkState;
   shrinkStage: 'source' | 'target';
   onAdvanceShrink: () => void;
   onResetShrink: () => void;
-  scaleCountry: CountryInfo | null;
   compareCodes: [string, string];
   onCompareChange: (slot: 0 | 1, code: string) => void;
   timelineCode: string;
@@ -88,8 +89,19 @@ function useNow(ms: number): Date {
 
 export default function InfoPanel(props: Readonly<InfoPanelProps>) {
   const { mode, point } = props;
+  // On phones the panel is a bottom sheet that can peek (collapsed) so the
+  // globe stays the hero; tapping the handle expands it.
+  const isPhone = useMediaQuery('(max-width: 768px)');
+  const [collapsed, setCollapsed] = useState(false);
 
-  const contentKey = `${mode}-${props.passportCode}-${props.shrinkStage}-${props.compareCodes.join('')}-${props.timelineCode}-${props.route.from.name}${props.route.to.name}-${props.wonder?.id ?? ''}`;
+  // A new selection or a mode switch should reveal the result.
+  useEffect(() => {
+    setCollapsed(false);
+  }, [mode, point]);
+
+  const contentKey = `${mode}-${props.passportCode}-${props.shrinkStage}-${props.flightMode}-${props.compareCodes.join('')}-${props.timelineCode}-${props.route.from.name}${props.route.to.name}-${props.wonder?.id ?? ''}`;
+
+  const className = `info-panel glass${isPhone ? ' sheet' : ''}${isPhone && collapsed ? ' collapsed' : ''}`;
 
   return (
     <motion.aside
@@ -97,9 +109,18 @@ export default function InfoPanel(props: Readonly<InfoPanelProps>) {
       animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
       exit={{ opacity: 0, x: 32, filter: 'blur(4px)' }}
       transition={{ delay: 0.2, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-      className="info-panel glass"
+      className={className}
     >
-      <div className="panel-handle" aria-hidden="true" />
+      <button
+        className="panel-handle"
+        type="button"
+        onClick={() => isPhone && setCollapsed(c => !c)}
+        aria-label={collapsed ? 'Expand details' : 'Collapse details'}
+        aria-expanded={!collapsed}
+        tabIndex={isPhone ? 0 : -1}
+      >
+        <span className="panel-handle-bar" />
+      </button>
       {point && <LocationHeader point={point} place={props.place} />}
       <AnimatePresence mode="wait">
         <motion.div
@@ -129,31 +150,33 @@ function PanelBody(props: Readonly<InfoPanelProps>) {
           onBlastTypeChange={props.onBlastTypeChange}
         />
       );
-    case 'scale':
-      return <ScaleBody point={props.point} country={props.scaleCountry} />;
-    case 'daynight':
-      return <DayNightBody point={props.point} />;
-    case 'visa':
-      return <VisaBody passportCode={props.passportCode} onPassportChange={props.onPassportChange} />;
-    case 'flightradius':
+    case 'truesize':
       return (
-        <FlightRadiusBody
-          point={props.point}
-          flightHours={props.flightHours}
-          onFlightHoursChange={props.onFlightHoursChange}
-        />
-      );
-    case 'climatetwin':
-      return <ClimateTwinBody point={props.point} />;
-    case 'shrinkray':
-      return (
-        <ShrinkRayBody
+        <TrueSizeBody
           shrink={props.shrink}
           stage={props.shrinkStage}
           onAdvance={props.onAdvanceShrink}
           onReset={props.onResetShrink}
         />
       );
+    case 'daynight':
+      return <DayNightBody point={props.point} />;
+    case 'visa':
+      return <VisaBody passportCode={props.passportCode} onPassportChange={props.onPassportChange} />;
+    case 'flight':
+      return (
+        <FlightBody
+          flightMode={props.flightMode}
+          onFlightModeChange={props.onFlightModeChange}
+          point={props.point}
+          flightHours={props.flightHours}
+          onFlightHoursChange={props.onFlightHoursChange}
+          route={props.route}
+          onRouteChange={props.onRouteChange}
+        />
+      );
+    case 'climatetwin':
+      return <ClimateTwinBody point={props.point} />;
     case 'compare':
       return <CompareBody codes={props.compareCodes} onChange={props.onCompareChange} />;
     case 'timeline':
@@ -165,8 +188,6 @@ function PanelBody(props: Readonly<InfoPanelProps>) {
       );
     case 'population':
       return <PopulationBody />;
-    case 'flightroute':
-      return <FlightRouteBody route={props.route} onChange={props.onRouteChange} />;
     case 'wonders':
       return <WondersBody wonder={props.wonder} onSelect={props.onWonderSelect} />;
     case 'space':
@@ -388,47 +409,6 @@ function CmpRow({ name, ratio }: Readonly<{ name: string; ratio: number }>) {
   );
 }
 
-function ScaleBody({ point, country }: Readonly<{ point: LatLng | null; country: CountryInfo | null }>) {
-  if (!point) {
-    return (
-      <>
-        <Title sub="True size vs the Mercator lie">Scale</Title>
-        <Placeholder text="Click a country to reveal its true size" />
-      </>
-    );
-  }
-
-  const stretch = mercatorLinearFactor(point.lat);
-  const areaInflate = mercatorAreaFactor(point.lat);
-
-  if (!country) {
-    return (
-      <>
-        <Title sub="True size vs the Mercator lie">Scale</Title>
-        <Row label="Latitude" value={`${Math.abs(point.lat).toFixed(1)}°${point.lat >= 0 ? 'N' : 'S'}`} />
-        <Row label="Mercator stretch" value={`${stretch.toFixed(2)}×`} />
-        <Row label="Looks bigger by" value={`${areaInflate.toFixed(1)}×`} />
-        <p className="panel-sub" style={{ marginTop: '10px' }}>Click on land to compare a country's real area.</p>
-      </>
-    );
-  }
-
-  const comparisons = getScaleComparisons(country.areaKm2);
-  const landPct = (country.areaKm2 / EARTH_LAND_AREA) * 100;
-  return (
-    <>
-      <Title sub="True size vs the Mercator lie">{country.name}</Title>
-      <Row label="True area" value={`${fmt(country.areaKm2)} km²`} />
-      <Row label="Share of land" value={`${landPct < 0.1 ? landPct.toFixed(2) : landPct.toFixed(1)}%`} />
-      <Row label="On flat maps" value={<span style={{ color: 'var(--accent-2)' }}>{areaInflate.toFixed(1)}× bigger</span>} />
-      <p className="t-label" style={{ marginTop: '12px', marginBottom: '4px' }}>Compared to</p>
-      {comparisons.map(c => (
-        <CmpRow key={c.name} name={c.name} ratio={c.ratio} />
-      ))}
-    </>
-  );
-}
-
 function DayNightBody({ point }: Readonly<{ point: LatLng | null }>) {
   const now = useNow(1000);
   const sub = subsolarPoint(now);
@@ -515,8 +495,67 @@ function VisaBody({
   );
 }
 
-// ── Mode 8: Flight Radius ─────────────────────────────────────
-function FlightRadiusBody({
+// ── Flight — reach circle + great-circle routes ───────────────
+function FlightBody({
+  flightMode,
+  onFlightModeChange,
+  point,
+  flightHours,
+  onFlightHoursChange,
+  route,
+  onRouteChange,
+}: Readonly<{
+  flightMode: FlightMode;
+  onFlightModeChange: (m: FlightMode) => void;
+  point: LatLng | null;
+  flightHours: number;
+  onFlightHoursChange: (h: number) => void;
+  route: { from: City; to: City };
+  onRouteChange: (slot: 'from' | 'to', name: string) => void;
+}>) {
+  return (
+    <>
+      <Title sub={flightMode === 'reach' ? 'How far can you fly from here?' : 'Plot a great-circle flight path'}>
+        Flight
+      </Title>
+      <div style={{ display: 'flex', gap: 3, padding: 3, marginBottom: 14, borderRadius: 12, background: 'var(--surface-input)' }}>
+        {(['reach', 'route'] as const).map(m => {
+          const active = flightMode === m;
+          return (
+            <button
+              key={m}
+              type="button"
+              onClick={() => onFlightModeChange(m)}
+              aria-pressed={active}
+              style={{
+                flex: 1,
+                padding: '8px 10px',
+                borderRadius: 9,
+                border: 'none',
+                background: active ? 'var(--glass-bg-strong)' : 'transparent',
+                color: active ? 'var(--accent)' : 'var(--muted)',
+                fontFamily: 'var(--font-display)',
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: active ? 'var(--shadow-sm)' : 'none',
+              }}
+            >
+              {m === 'reach' ? 'Reach' : 'Route'}
+            </button>
+          );
+        })}
+      </div>
+      {flightMode === 'reach' ? (
+        <FlightReachBody point={point} flightHours={flightHours} onFlightHoursChange={onFlightHoursChange} />
+      ) : (
+        <FlightRouteFields route={route} onChange={onRouteChange} />
+      )}
+    </>
+  );
+}
+
+function FlightReachBody({
   point,
   flightHours,
   onFlightHoursChange,
@@ -529,7 +568,6 @@ function FlightRadiusBody({
   const reachable = point ? getCitiesInRadius(point.lat, point.lng, radiusKm) : [];
   return (
     <>
-      <Title sub="How far can you fly from here?">Flight Radius</Title>
       <div style={{ marginBottom: '6px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
           <span className="stat-label">Flight time</span>
@@ -596,8 +634,8 @@ function ClimateTwinBody({ point }: Readonly<{ point: LatLng | null }>) {
   );
 }
 
-// ── Mode 10: Country Shrink Ray ───────────────────────────────
-function ShrinkRayBody({
+// ── True Size — inspect a country, then drop it on another ────
+function TrueSizeBody({
   shrink,
   stage,
   onAdvance,
@@ -613,28 +651,36 @@ function ShrinkRayBody({
   if (!source) {
     return (
       <>
-        <Title sub="Compare the true size of countries">Shrink Ray</Title>
-        <Placeholder text="Click a country to pick it up" />
+        <Title sub="Real size vs the Mercator lie">True Size</Title>
+        <Placeholder text="Click a country to reveal its true size" />
       </>
     );
   }
 
+  const areaInflate = source.lat != null ? mercatorAreaFactor(source.lat) : null;
+  const landPct = (source.areaKm2 / EARTH_LAND_AREA) * 100;
+  const comparisons = getScaleComparisons(source.areaKm2);
   const ratio = target ? source.areaKm2 / target.areaKm2 : null;
 
   return (
     <>
-      <Title sub="Compare the true size of countries">Shrink Ray</Title>
-      <Row label="Country" value={source.name} />
-      <Row label="Area" value={`${fmt(source.areaKm2)} km²`} />
+      <Title sub="Real size vs the Mercator lie">{source.name}</Title>
+      <Row label="True area" value={`${fmt(source.areaKm2)} km²`} />
+      <Row label="Share of land" value={`${landPct < 0.1 ? landPct.toFixed(2) : landPct.toFixed(1)}%`} />
+      {areaInflate != null && (
+        <Row label="On flat maps" value={<span style={{ color: 'var(--accent-2)' }}>{areaInflate.toFixed(1)}× bigger</span>} />
+      )}
 
       {!target && stage === 'source' && (
-        <button
-          onClick={onAdvance}
-          className="btn-ghost"
-          style={{ marginTop: '14px' }}
-        >
-          Compare with…
-        </button>
+        <>
+          <p className="t-label" style={{ marginTop: '12px', marginBottom: '4px' }}>Compared to</p>
+          {comparisons.map(c => (
+            <CmpRow key={c.name} name={c.name} ratio={c.ratio} />
+          ))}
+          <button onClick={onAdvance} className="btn-ghost" style={{ marginTop: '14px' }}>
+            Drop it on another country →
+          </button>
+        </>
       )}
 
       {!target && stage === 'target' && (
@@ -765,8 +811,8 @@ function CompareBody({
   );
 }
 
-// ── Flight Route Explorer ─────────────────────────────────────
-function FlightRouteBody({
+// ── Flight route fields (rendered inside FlightBody) ──────────
+function FlightRouteFields({
   route,
   onChange,
 }: Readonly<{ route: { from: City; to: City }; onChange: (slot: 'from' | 'to', name: string) => void }>) {
@@ -774,7 +820,6 @@ function FlightRouteBody({
   const cities = [...CITIES].sort((x, y) => x.name.localeCompare(y.name));
   return (
     <>
-      <Title sub="Pick two cities to plot a route">Flight Route</Title>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
         {(['from', 'to'] as const).map(slot => (
           <div key={slot} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1000,6 +1045,9 @@ function WondersBody({ wonder, onSelect }: Readonly<{ wonder: Wonder | null; onS
           return (
             <button
               key={w.id}
+              type="button"
+              aria-label={`${w.name}, ${w.country}`}
+              aria-pressed={active}
               onClick={() => onSelect(w)}
               style={{
                 padding: '7px 11px',
