@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls, useMotionValue, animate, type PanInfo } from 'framer-motion';
 import { useMediaQuery } from '../lib/useMediaQuery';
 import type { Mode, LatLng, BlastType, ShrinkState, City, Wonder, ISSPosition, WeatherInfo, FlightMode } from '../types';
 import {
@@ -87,36 +87,105 @@ function useNow(ms: number): Date {
   return now;
 }
 
+type Snap = 'peek' | 'half' | 'full';
+const PEEK_PX = 188;
+const SPRING = { type: 'spring' as const, stiffness: 420, damping: 42 };
+
 export default function InfoPanel(props: Readonly<InfoPanelProps>) {
   const { mode, point } = props;
-  // On phones the panel is a bottom sheet that can peek (collapsed) so the
-  // globe stays the hero; tapping the handle expands it.
+  // On phones the panel becomes a draggable bottom sheet with peek/half/full
+  // snap points, so the globe stays the hero and tappable. Drag the handle (or
+  // tap it) to pull up for detail; drag down to clear more of the globe. Its
+  // height is fixed at the fully-expanded size and we translate it down to
+  // collapse, so visible height = sheetH − y.
   const isPhone = useMediaQuery('(max-width: 768px)');
-  const [collapsed, setCollapsed] = useState(false);
 
-  // A new selection or a mode switch should reveal the result.
+  const [vh, setVh] = useState(() => (typeof window !== 'undefined' ? window.innerHeight : 800));
   useEffect(() => {
-    setCollapsed(false);
-  }, [mode, point]);
+    const onResize = () => setVh(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const sheetH = Math.min(vh * 0.82, vh - 140);
+  const halfVisible = Math.min(sheetH, vh * 0.52);
+  const offsetFor = (s: Snap) => {
+    if (s === 'full') return 0;
+    return Math.max(0, sheetH - (s === 'half' ? halfVisible : PEEK_PX));
+  };
+
+  const [snap, setSnap] = useState<Snap>('peek');
+  const y = useMotionValue(sheetH); // start fully tucked away; settle to peek on mount
+  const dragControls = useDragControls();
+
+  // A new selection or a mode switch reveals a compact peek (globe stays hero).
+  // Adjusting state during render (the React-recommended pattern) instead of in
+  // an effect avoids a frame where the sheet sits at the previous snap.
+  const selectionKey = `${mode}:${point?.lat ?? ''},${point?.lng ?? ''}`;
+  const [lastSelection, setLastSelection] = useState(selectionKey);
+  if (selectionKey !== lastSelection) {
+    setLastSelection(selectionKey);
+    setSnap('peek');
+  }
+
+  // Settle the sheet to the active snap whenever the snap or geometry changes.
+  useEffect(() => {
+    if (!isPhone) return;
+    const controls = animate(y, offsetFor(snap), SPRING);
+    return () => controls.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap, isPhone, sheetH, halfVisible]);
+
+  const cycleSnap = () => setSnap(s => (s === 'peek' ? 'half' : s === 'half' ? 'full' : 'peek'));
+
+  const handleDragEnd = (_e: unknown, info: PanInfo) => {
+    const projected = y.get() + info.velocity.y * 0.18;
+    let best: Snap = 'peek';
+    let bestDist = Infinity;
+    for (const s of ['full', 'half', 'peek'] as const) {
+      const dist = Math.abs(offsetFor(s) - projected);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = s;
+      }
+    }
+    if (best === snap) animate(y, offsetFor(best), SPRING);
+    else setSnap(best);
+  };
 
   const contentKey = `${mode}-${props.passportCode}-${props.shrinkStage}-${props.flightMode}-${props.compareCodes.join('')}-${props.timelineCode}-${props.route.from.name}${props.route.to.name}-${props.wonder?.id ?? ''}`;
 
-  const className = `info-panel glass${isPhone ? ' sheet' : ''}${isPhone && collapsed ? ' collapsed' : ''}`;
+  const className = `info-panel glass${isPhone ? ` sheet ${snap}` : ''}`;
+
+  const entrance = isPhone
+    ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0.3 } }
+    : {
+        initial: { opacity: 0, x: 48, filter: 'blur(6px)' },
+        animate: { opacity: 1, x: 0, filter: 'blur(0px)' },
+        exit: { opacity: 0, x: 32, filter: 'blur(4px)' },
+        transition: { delay: 0.2, duration: 0.55, ease: [0.16, 1, 0.3, 1] as const },
+      };
 
   return (
     <motion.aside
-      initial={{ opacity: 0, x: 48, filter: 'blur(6px)' }}
-      animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
-      exit={{ opacity: 0, x: 32, filter: 'blur(4px)' }}
-      transition={{ delay: 0.2, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
       className={className}
+      style={isPhone ? { y, height: sheetH } : undefined}
+      drag={isPhone ? 'y' : false}
+      dragListener={false}
+      dragControls={dragControls}
+      dragConstraints={{ top: 0, bottom: offsetFor('peek') }}
+      dragElastic={0.06}
+      dragMomentum={false}
+      onDragEnd={isPhone ? handleDragEnd : undefined}
+      {...entrance}
     >
       <button
         className="panel-handle"
         type="button"
-        onClick={() => isPhone && setCollapsed(c => !c)}
-        aria-label={collapsed ? 'Expand details' : 'Collapse details'}
-        aria-expanded={!collapsed}
+        onPointerDown={e => isPhone && dragControls.start(e)}
+        onClick={() => isPhone && cycleSnap()}
+        aria-label={snap === 'full' ? 'Collapse details' : 'Expand details'}
+        aria-expanded={snap !== 'peek'}
         tabIndex={isPhone ? 0 : -1}
       >
         <span className="panel-handle-bar" />

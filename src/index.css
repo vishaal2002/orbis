@@ -339,7 +339,7 @@ body {
   margin: 0 auto var(--s4);
   transition: background-color var(--dur-fast), width var(--dur-fast);
 }
-.info-panel.collapsed .panel-handle-bar { background: var(--accent); width: 52px; }
+.info-panel.sheet.peek .panel-handle-bar { background: var(--accent); width: 52px; }
 .panel-divider {
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--hairline), transparent);
@@ -1162,24 +1162,39 @@ body {
   .landing-brand-sub { display: none; }
   .landing-kbd-hint { display: none; }
   .landing-footer { padding-top: var(--s2); }
+  /* Draggable bottom sheet. Height is JS-driven (fully-expanded size) and the
+     sheet is translated down to collapse; it sits above the dock and never
+     fully hides, so the globe above it stays the hero and tappable. */
   .info-panel.sheet {
     top: auto !important;
     right: calc(var(--safe-right) + var(--s2)) !important;
     left: calc(var(--safe-left) + var(--s2)) !important;
     bottom: calc(var(--safe-bottom) + 72px) !important;
     width: auto !important;
-    max-height: min(56vh, 440px);
-    padding: var(--s2) var(--s5) var(--s5);
+    max-height: none !important;
+    padding: 0 var(--s5) var(--s5);
     border-radius: var(--r-2xl) !important;
-    transition: max-height 0.42s var(--ease-out), padding 0.42s var(--ease-out);
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    will-change: transform;
   }
-  /* peek: just the handle + the title / location line, so the globe stays visible */
-  .info-panel.sheet.collapsed {
-    max-height: 96px;
-    overflow: hidden;
-    padding-bottom: var(--s2);
+  /* peek: only the handle + location / headline shows, so the globe stays clear */
+  .info-panel.sheet.peek { overflow: hidden; }
+  .panel-handle {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: var(--s3) 0 var(--s2);
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    touch-action: none;
+    cursor: grab;
   }
-  .panel-handle { display: block; }
+  .panel-handle:active { cursor: grabbing; }
   .dock {
     left: calc(var(--safe-left) + var(--s2));
     right: calc(var(--safe-right) + var(--s2));
@@ -1212,17 +1227,21 @@ body {
   .zoom-cluster { display: none; }
 }
 
-/* Landscape phone: a full-width bottom sheet would swallow the short viewport,
-   so dock the panel to the right as a compact column and keep the globe visible. */
+/* Landscape phone: a full-height drag sheet would swallow the short viewport,
+   so neutralise the JS transform/height and dock a compact static column to the
+   right instead, keeping the globe visible. */
 @media (max-width: 768px) and (max-height: 500px) {
   .info-panel.sheet {
     left: auto !important;
     right: calc(var(--safe-right) + var(--s2)) !important;
     bottom: calc(var(--safe-bottom) + var(--s2)) !important;
     width: min(300px, 52vw) !important;
-    max-height: calc(100vh - var(--safe-top) - var(--safe-bottom) - var(--s4));
+    height: auto !important;
+    max-height: calc(100vh - var(--safe-top) - var(--safe-bottom) - var(--s4)) !important;
+    transform: none !important;
+    overflow-y: auto !important;
   }
-  .info-panel.sheet.collapsed { max-height: 92px; }
+  .info-panel.sheet .panel-handle { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
