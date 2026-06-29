@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Analytics } from '@vercel/analytics/react';
 import Globe, { type GlobeHandle } from './components/Globe';
 import Landing from './components/Landing';
 import ModeGallery from './components/ModeGallery';
@@ -292,6 +293,7 @@ export default function App() {
       </AnimatePresence>
 
       <Toast message={toast} />
+      <Analytics />
     </div>
   );
 }

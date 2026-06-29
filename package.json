@@ -13,6 +13,7 @@
   "dependencies": {
     "@turf/turf": "^7.3.5",
     "@types/three": "^0.184.1",
+    "@vercel/analytics": "^2.0.1",
     "framer-motion": "^12.40.0",
     "globe.gl": "^2.46.1",
     "lucide-react": "^1.21.0",
